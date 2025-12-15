@@ -54,14 +54,14 @@ pkgs.mkShell {
 # -DCMAKE_THREAD_LIBS_INIT="-lpthread" \
 
   shellHook = ''
-    export CCACHE_DIR="$PWD/.ccache"
+    export CCACHE_DIR="$PWD/.cache/.ccache"
     mkdir -p "$CCACHE_DIR"
 
-    DIR='build'
+    DIR='build-linux'
 
     # Setup the build and obtain a fresh complie_commands.json for the lsp
     mk() {
-      cmake -S . -B $DIR \
+      cmake -S . -B $DIR -GNinja \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
         -DCMAKE_INSTALL_PREFIX="$PWD/$DIR/install" \
         -DCMAKE_C_COMPILER_LAUNCHER="ccache" \
@@ -75,8 +75,11 @@ pkgs.mkShell {
     # Actually build the /install contents for usage in the game
     bd() {
       mk
-      cmake --build $DIR
+      ninja -C $DIR engine-legacy
       cmake --install $DIR
+    }
+
+    run() {
     }
   '';
 }
