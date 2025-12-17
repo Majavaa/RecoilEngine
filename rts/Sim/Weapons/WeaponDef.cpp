@@ -574,6 +574,18 @@ void WeaponDef::ParseWeaponSounds(const LuaTable& wdTable) {
 
 
 
+/**
+ * @brief Loads sound entries for a given sound key from a weapon Lua table into a GuiSoundSet.
+ *
+ * Reads a single filename or an indexed subtable under `soundKey` and appends each resolved entry
+ * to `soundData`. Volume is taken from `<soundKey>Volume` or falls back to `soundHitVolume` (default 1.0).
+ * For hit-sound keys `soundHitDry` and `soundHitWet`, a fallback to the `soundHit` key is attempted
+ * when no direct entry for the specific key exists.
+ *
+ * @param wdTable Lua table containing weapon definition sound fields.
+ * @param soundKey Key to look up (e.g., "soundStart", "soundHitDry", "soundHitWet").
+ * @param[out] soundData Target sound set to which resolved filenames and volumes are added.
+ */
 void WeaponDef::LoadSound(
 	const LuaTable& wdTable,
 	const std::string& soundKey,
