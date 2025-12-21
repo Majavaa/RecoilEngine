@@ -26,6 +26,8 @@ class SoundItem;
 class CSound : public ISound
 {
 public:
+	void DrawDebug() const;  // Debug visualization method
+public:
 	CSound();
 	~CSound();
 

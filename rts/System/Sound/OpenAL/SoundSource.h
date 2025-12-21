@@ -8,7 +8,6 @@
 
 #include <al.h>
 
-#include "System/Misc/NonCopyable.h"
 #include "System/Misc/SpringTime.h"
 #include "System/float3.h"
 
@@ -36,6 +35,8 @@ public:
 	void Update();
 	void Delete();
 
+    void ApplyGainBasedOnVisiblity(const bool smooth);
+
 	void UpdateVolume();
 	bool IsValid() const { return (id != 0); };
 
@@ -51,9 +52,16 @@ public:
 	void StreamPause();
 	float GetStreamTime();
 	float GetStreamPlayTime();
+    void ComputeCameraSpaceData();
 
 	static void SetPitch(const float& newPitch) { globalPitch = newPitch; }
 	static void SetHeightRolloffModifer(const float& mod) { heightRolloffModifier = mod; }
+
+    bool IsIn3D() const { return in3D; }
+    float3 GetPosition() const { return currentPosition; }
+    ALuint GetId() const { return id; }
+
+    static constexpr float VIEWPORT_VOLUME_REDUCTION_SPEED = 0.02f;
 
 private:
 	void swap(CSoundSource& other);
@@ -93,6 +101,17 @@ private:
 private:
 	ALuint id = 0;
 
+    ALuint attenuationFilter = 0;
+    float outerDistance = 0;
+    float innerDistance = 0;
+    float forwardDistance = 0;
+    float2 viewportHalfExtents = float2();
+    float terrainDistance;
+
+    float cameraZoom;
+
+    float3 currentPosition = float3(0.0f, 0.0f, 0.0f);
+
 	SoundItemData curPlayingItem;
 	AsyncSoundItemData asyncPlayItem;
 
@@ -100,10 +119,15 @@ private:
 	std::unique_ptr <MusicStream> curStream;
 
 	float curVolume = 1.0f;
+    float curViewportVolumeMultiplier = 0;
+
 	spring_time loopStop {1e9};
+    spring_time lastUpdate = spring_gettime();
 	bool in3D = false;
 	bool efxEnabled = false;
 	int efxUpdates = 0;
+
+    std::string name;
 
 	ALfloat curHeightRolloffModifier = 1.0f;
 };
