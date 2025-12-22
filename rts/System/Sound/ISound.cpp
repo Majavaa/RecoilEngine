@@ -40,7 +40,9 @@ CONFIG(float, snd_airAbsorption).defaultValue(0.1f);
 
 CONFIG(std::string, snd_device).defaultValue("").description("Sets the used output device. See \"Available Devices\" section in infolog.txt.");
 
-
+CONFIG(bool, snd_useAttenuationModel)
+    .defaultValue(false)
+    .description("Use the new AttenuationModel system. Affects how you hear 3D sounds in the game. Recommended: ON");
 
 #ifndef NO_SOUND
 // [0] := Music, [1] := General, [2] := Battle, [3] := UnitReply, [4] := UserInterface

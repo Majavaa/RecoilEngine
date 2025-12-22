@@ -4,6 +4,7 @@
 
 #include "Camera.h"
 #include "CameraHandler.h"
+#include "Game/TraceRay.h"
 #include "UI/MouseHandler.h"
 #include "Map/Ground.h"
 #include "Map/ReadMap.h"
@@ -708,6 +709,24 @@ void CCamera::ClipFrustumLines(const float zmin, const float zmax, bool neg)
 	}
 }
 
+void CCamera::TraceToTerrain() {
+    if (camType != CAMTYPE_PLAYER)
+        return;
+
+    const CUnit* hitUnit = nullptr;
+    const CFeature* hitFeature = nullptr;
+
+    terrainDistance = TraceRay::GuiTraceRay(
+        GetPos(),
+        GetForward(),
+        30000,
+        nullptr,
+        hitUnit,
+        hitFeature,
+        true,
+        true
+    );
+}
 
 float3 CCamera::GetMoveVectorFromState(bool fromKeyState) const
 {
@@ -716,7 +735,7 @@ float3 CCamera::GetMoveVectorFromState(bool fromKeyState) const
 
 	if (useInterpolate > 0)
 		camDeltaTime = 1000.0f / std::fmax(globalRendering->FPS, 1.0f);
-	
+
 	float camMoveSpeed = 1.0f;
 
 	camMoveSpeed *= movState[MOVE_STATE_SLW] ? moveSlowMult : 1.0f;

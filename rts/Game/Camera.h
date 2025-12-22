@@ -202,6 +202,7 @@ public:
 	float GetNearPlaneDist() const { return frustum.scales.z; }
 	float GetFarPlaneDist() const { return frustum.scales.w; }
 	float GetAspectRatio() const { return aspectRatio; }
+    float GetTerrainDistance() const { return terrainDistance; }
 
 	float3 GetMoveVectorFromState(bool fromKeyState) const;
 
@@ -253,6 +254,7 @@ private:
 
 	void UpdateDirsFromRot(const float3& r);
 
+    void TraceToTerrain();
 public:
 	float3 pos;
 	float3 rot;                   ///< x = inclination, y = azimuth (to the -z axis!), z = roll
@@ -308,6 +310,8 @@ private:
 	uint32_t projType = -1u;
 
 	uint8_t inViewPlanesMask;
+
+    float terrainDistance;
 
 	bool movState[10]; // fwd, back, left, right, up, down, fast, slow, tilt, reset
 	bool rotState[4]; // unused

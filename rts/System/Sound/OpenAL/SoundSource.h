@@ -9,9 +9,10 @@
 #include <al.h>
 
 #include "System/Misc/SpringTime.h"
+#include "System/Sound/IAudioChannel.h"
+#include "System/Sound/ISoundAttenuationModel.h"
 #include "System/float3.h"
 
-class IAudioChannel;
 class SoundItem;
 class MusicStream;
 
@@ -32,10 +33,13 @@ public:
 	CSoundSource& operator = (CSoundSource&& src);
 	CSoundSource& operator = (const CSoundSource& src) = delete;
 
+    static constexpr float ROLLOFF_FACTOR = 5.0f;
+    static constexpr float REFERENCE_DIST = 200.0f;
+
 	void Update();
 	void Delete();
 
-    void ApplyGainBasedOnVisiblity(const bool smooth);
+    void ApplyAttenuationModel(const bool smooth);
 
 	void UpdateVolume();
 	bool IsValid() const { return (id != 0); };
@@ -66,6 +70,14 @@ public:
 private:
 	void swap(CSoundSource& other);
 
+    void Initialize(IAudioChannel* channel, SoundItem* item, float3 pos, float3 velocity, float volume, bool relative);
+    void EnableSpatialization();
+    void DisableSpatialization();
+
+    float GetSummedVolume() {
+        return (currentChannel ? currentChannel->volume : 1.0f) * currentSoundItem.volume * currentVolume;
+    }
+
 	struct AsyncSoundItemData {
 		IAudioChannel* channel = nullptr;
 
@@ -87,7 +99,7 @@ private:
 		unsigned int loopTime = 0;
 		int priority = 0;
 
-		float rndGain = 0.0f;
+		float volume = 0.0f;
 		float rolloff = 0.0f;
 	};
 
@@ -108,17 +120,21 @@ private:
     float2 viewportHalfExtents = float2();
     float terrainDistance;
 
+    SoundAttenuationOutput attenuationOutput;
+
+    float bufferId = 0;
+
     float cameraZoom;
 
     float3 currentPosition = float3(0.0f, 0.0f, 0.0f);
 
-	SoundItemData curPlayingItem;
+	SoundItemData currentSoundItem;
 	AsyncSoundItemData asyncPlayItem;
 
-	IAudioChannel* curChannel = nullptr;
+	IAudioChannel* currentChannel = nullptr;
 	std::unique_ptr <MusicStream> curStream;
 
-	float curVolume = 1.0f;
+	float currentVolume = 1.0f;
     float curViewportVolumeMultiplier = 0;
 
 	spring_time loopStop {1e9};
@@ -133,3 +149,4 @@ private:
 };
 
 #endif
+

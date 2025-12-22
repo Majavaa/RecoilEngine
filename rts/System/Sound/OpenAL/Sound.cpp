@@ -53,11 +53,13 @@ spring::recursive_mutex soundMutex;
 CSound::CSound()
 {
 	configHandler->NotifyOnChange(this, {"snd_volmaster", "snd_eaxpreset", "snd_filter", "UseEFX", "snd_volgeneral", "snd_volunitreply", "snd_volbattle", "snd_volui", "snd_volmusic", "PitchAdjust"});
+    attenuationModel = new RtsAttenuationModel();
 }
 
 CSound::~CSound()
 {
 	configHandler->RemoveObserver(this);
+    delete attenuationModel;
 }
 
 
