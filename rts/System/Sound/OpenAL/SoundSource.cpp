@@ -242,6 +242,10 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
 		if (itemBuffer.GetChannels() > 1)
 			LOG_L(L_WARNING, "Can not play non-mono \"%s\" in 3d.", itemBuffer.GetFilename().c_str());
 
+		alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
+		pos *= ELMOS_TO_METERS;
+		alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
+
 		in3D = true;
 		if (efx.Enabled()) {
 			efxEnabled = true;
@@ -251,9 +255,6 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
 			efxUpdates = efx.updates;
 		}
 
-		alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
-		pos *= ELMOS_TO_METERS;
-		alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
 		curHeightRolloffModifier = heightRolloffModifier;
 		alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier);
 
