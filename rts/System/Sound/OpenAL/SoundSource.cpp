@@ -284,6 +284,7 @@ void CSoundSource::Initialize(IAudioChannel* channel, SoundItem* item, float3 po
     currentChannel = channel;
     in3D = !relative && item->in3D;
     bufferId = item->GetSoundBufferID();
+    currentPosition = pos;
 
     const SoundBuffer& itemBuffer = SoundBuffer::GetById(bufferId);
     alSourcei(id, AL_BUFFER, itemBuffer.GetId());
