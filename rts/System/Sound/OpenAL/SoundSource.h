@@ -148,7 +148,7 @@ private:
 
 	ALfloat curHeightRolloffModifier = 1.0f;
 
-    bool useAttenuationModel = configHandler->GetBool("snd_useAttenuationModel");
+    bool UseAttenuationModel() { return configHandler->GetBool("snd_useAttenuationModel"); }
 };
 
 #endif
