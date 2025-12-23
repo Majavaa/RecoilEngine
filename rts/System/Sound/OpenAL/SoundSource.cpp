@@ -316,9 +316,9 @@ void CSoundSource::EnableSpatialization()
     if (itemBuffer.GetChannels() > 1)
         LOG_L(L_WARNING, "Can not play non-mono \"%s\" in 3d.", itemBuffer.GetFilename().c_str());
 
-    // alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
-    // float3 pos = currentPosition * ELMOS_TO_METERS;
-    // alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
+    alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
+    float3 pos = currentPosition * ELMOS_TO_METERS;
+    alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
 
     if (configHandler->GetBool("snd_useAttenuationModel")) {
 
@@ -340,10 +340,6 @@ void CSoundSource::EnableSpatialization()
             alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
             efxUpdates = efx.updates;
         }
-
-        alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
-        float3 pos = currentPosition * ELMOS_TO_METERS;
-        alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
 
         curHeightRolloffModifier = heightRolloffModifier;
         alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * currentSoundItem.rolloff * heightRolloffModifier);
