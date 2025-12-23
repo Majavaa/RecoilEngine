@@ -8,6 +8,7 @@
 
 #include <al.h>
 
+#include "System/Config/ConfigHandler.h"
 #include "System/Misc/SpringTime.h"
 #include "System/Sound/IAudioChannel.h"
 #include "System/Sound/ISoundAttenuationModel.h"
@@ -146,6 +147,8 @@ private:
     std::string name;
 
 	ALfloat curHeightRolloffModifier = 1.0f;
+
+    bool useAttenuationModel = configHandler->GetBool("snd_useAttenuationModel");
 };
 
 #endif
