@@ -2,6 +2,7 @@
 
 #include "SoundSource.h"
 
+#include <al.h>
 #include <climits>
 #include <alc.h>
 
@@ -19,8 +20,6 @@
 
 #include "Sim/Misc/GlobalConstants.h"
 #include "System/float3.h"
-#include "System/StringUtil.h"
-#include "System/SpringMath.h"
 
 static constexpr float ROLLOFF_FACTOR = 5.0f;
 static constexpr float REFERENCE_DIST = 200.0f;
@@ -33,6 +32,7 @@ float CSoundSource::heightRolloffModifier = 1.0f;
 
 void CSoundSource::swap(CSoundSource& r)
 {
+    LOG_L(L_WARNING, "SWAP");
 	std::swap(id, r.id);
 	std::swap(currentChannel, r.currentChannel);
 	std::swap(curStream, r.curStream);
@@ -114,13 +114,13 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
     else
         curViewportVolumeMultiplier = totalValue;
 
-    float vol = GetSummedVolume();
+    //TODO currentSoundItem.randomVolume is quite overtuned on many things (0.35 for example)
+    // new system will treat volume as a normalized range (0-1) so 0.35 is like 35% variable volume which is ridiculous
+    // for now, just ignore the randomVolume in the calculations
 
-    vol = Curve(curViewportVolumeMultiplier, 0.0f, 1.0f, 3);
+    float vol = Curve(curViewportVolumeMultiplier, 0.0f, 1.0f, 3) * currentChannel->GetVolume() * currentVolume;
 
-    if (name.contains("sizzle"))
-        LOG_L(L_NOTICE, "val: %f, vol: %f", totalValue, vol);
-
+    efx.Enabled();
     alSourcef(id, AL_GAIN, vol);
 
     float filter = 1;
@@ -129,8 +129,6 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
         float factor = std::min(curViewportVolumeMultiplier / 1.0f, 1.0f);
         filter = Curve(factor, 0.1f, 1.0f, 0.75f);
     }
-
-    LOG_L(L_NOTICE, "name: %s, output: %f, vol: %f", name.c_str(), totalValue, vol);
 
     alFilterf(attenuationFilter, AL_LOWPASS_GAIN, 1);
     alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, filter);
@@ -183,6 +181,133 @@ void CSoundSource::Update()
 		alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
 		efxUpdates = efx.updates;
 	}
+}
+
+void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, float3 velocity, float volume, bool relative)
+{
+	assert(!curStream);
+	assert(channel);
+
+	if (!item->PlayNow())
+		return;
+
+	const SoundBuffer& itemBuffer = SoundBuffer::GetById(item->GetSoundBufferID());
+
+	Stop();
+
+	currentVolume = volume;
+    currentSoundItem = {
+        item->soundItemID,
+        item->loopTime,
+        item->priority,
+        item->GetGain(),
+        item->rolloff
+    };
+	currentChannel = channel;
+    currentPosition = pos;
+
+    name = item->name;
+
+	alSourcei(id, AL_BUFFER, itemBuffer.GetId());
+	alSourcef(id, AL_GAIN, volume * item->GetGain() * channel->volume);
+	alSourcef(id, AL_PITCH, item->GetPitch() * globalPitch);
+
+	velocity *= item->dopplerScale * ELMOS_TO_METERS;
+	alSource3f(id, AL_VELOCITY, velocity.x, velocity.y, velocity.z);
+	alSourcei(id, AL_LOOPING, (item->loopTime > 0) ? AL_TRUE : AL_FALSE);
+
+	loopStop = spring_gettime() + spring_msecs(item->loopTime);
+
+	if (relative || !item->in3D) {
+		in3D = false;
+		if (efxEnabled) {
+			alSource3i(id, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+			alSourcei(id, AL_DIRECT_FILTER, AL_FILTER_NULL);
+			efxEnabled = false;
+		}
+		alSourcei(id, AL_SOURCE_RELATIVE, AL_TRUE);
+		alSourcef(id, AL_ROLLOFF_FACTOR, 0.f);
+		alSource3f(id, AL_POSITION, 0.0f, 0.0f, -1.0f * ELMOS_TO_METERS);
+#if defined(__APPLE__) || defined(__OpenBSD__)
+		alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
+#endif
+	} else {
+		if (itemBuffer.GetChannels() > 1)
+			LOG_L(L_WARNING, "Can not play non-mono \"%s\" in 3d.", itemBuffer.GetFilename().c_str());
+
+        in3D = true;
+
+		alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
+		pos *= ELMOS_TO_METERS;
+		alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
+
+        if (UseAttenuationModel()) {
+
+            efx.Enable();
+            if (attenuationFilter == 0) {
+                alGenFilters(1, &attenuationFilter);
+                alFilteri(attenuationFilter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
+            }
+
+            // Need to disable physics based attenuation
+            alSourcef(id, AL_AIR_ABSORPTION_FACTOR, 0);
+            alSourcef(id, AL_REFERENCE_DISTANCE, 0);
+            alSourcef(id, AL_ROLLOFF_FACTOR, 0);
+
+            alFilterf(attenuationFilter, AL_LOWPASS_GAIN, 1);
+            alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, 1);
+
+            alSourcei(id, AL_DIRECT_FILTER, attenuationFilter);
+
+            ApplyAttenuationModel(false);
+
+        } else {
+            if (efx.Enabled()) {
+                efxEnabled = true;
+                alSourcef(id, AL_AIR_ABSORPTION_FACTOR, efx.GetAirAbsorptionFactor());
+                alSource3i(id, AL_AUXILIARY_SEND_FILTER, efx.sfxSlot, 0, AL_FILTER_NULL);
+                alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
+                efxUpdates = efx.updates;
+            }
+
+            curHeightRolloffModifier = heightRolloffModifier;
+            alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier);
+        }
+
+#if defined(__APPLE__) || defined(__OpenBSD__)
+		alSourcef(id, AL_MAX_DISTANCE, 1000000.0f);
+		// Max distance is too small by default on my Mac...
+		ALfloat gain = channel->volume * item->GetGain() * volume;
+		if (gain > 1.0f) {
+			// OpenAL on Mac cannot handle AL_GAIN > 1 well, so we will adjust settings to get the same output with AL_GAIN = 1.
+			const ALint model = alGetInteger(AL_DISTANCE_MODEL);
+			const ALfloat rolloff = ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier;
+			const ALfloat refDist = REFERENCE_DIST * ELMOS_TO_METERS;
+
+			if ((model == AL_INVERSE_DISTANCE_CLAMPED) || (model == AL_INVERSE_DISTANCE)) {
+				alSourcef(id, AL_REFERENCE_DISTANCE, ((gain - 1.0f) * refDist / rolloff) + refDist);
+				alSourcef(id, AL_ROLLOFF_FACTOR, (gain + rolloff - 1.0f) / gain);
+				alSourcef(id, AL_GAIN, 1.0f);
+			}
+		} else {
+			alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
+		}
+#endif
+
+	}
+
+	alSourcePlay(id);
+
+    if (name.contains("lasrfir")) {
+        float finalVol = 0;
+        alGetSourcefv(id, AL_GAIN, &finalVol);
+        LOG_L(L_NOTICE, "finalVol: %.2f", finalVol);
+    }
+
+	if (itemBuffer.GetId() == 0)
+		LOG_L(L_WARNING, "CSoundSource::Play: Empty buffer for item %s (file %s)", item->name.c_str(), itemBuffer.GetFilename().c_str());
+
+	CheckError("CSoundSource::Play");
 }
 
 void CSoundSource::Delete()
@@ -262,108 +387,6 @@ void CSoundSource::Stop()
 		oldChannel->SoundSourceFinished(this);
 	}
 	CheckError("CSoundSource::Stop");
-}
-
-void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, float3 velocity, float volume, bool relative)
-{
-	assert(!curStream);
-	assert(channel);
-
-	if (!item->PlayNow())
-		return;
-
-	const SoundBuffer& itemBuffer = SoundBuffer::GetById(item->GetSoundBufferID());
-
-	Stop();
-
-	currentVolume = volume;
-    currentSoundItem = {
-        item->soundItemID,
-        item->loopTime,
-        item->priority,
-        item->GetGain(),
-        item->rolloff
-    };
-	currentChannel = channel;
-    currentPosition = pos;
-
-    name = item->name;
-
-	alSourcei(id, AL_BUFFER, itemBuffer.GetId());
-	alSourcef(id, AL_GAIN, volume * item->GetGain() * channel->volume);
-	alSourcef(id, AL_PITCH, item->GetPitch() * globalPitch);
-
-	velocity *= item->dopplerScale * ELMOS_TO_METERS;
-	alSource3f(id, AL_VELOCITY, velocity.x, velocity.y, velocity.z);
-	alSourcei(id, AL_LOOPING, (item->loopTime > 0) ? AL_TRUE : AL_FALSE);
-
-	loopStop = spring_gettime() + spring_msecs(item->loopTime);
-
-	if (relative || !item->in3D) {
-		in3D = false;
-		if (efxEnabled) {
-			alSource3i(id, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
-			alSourcei(id, AL_DIRECT_FILTER, AL_FILTER_NULL);
-			efxEnabled = false;
-		}
-		alSourcei(id, AL_SOURCE_RELATIVE, AL_TRUE);
-		alSourcef(id, AL_ROLLOFF_FACTOR, 0.f);
-		alSource3f(id, AL_POSITION, 0.0f, 0.0f, -1.0f * ELMOS_TO_METERS);
-#if defined(__APPLE__) || defined(__OpenBSD__)
-		alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
-#endif
-	} else {
-		if (itemBuffer.GetChannels() > 1)
-			LOG_L(L_WARNING, "Can not play non-mono \"%s\" in 3d.", itemBuffer.GetFilename().c_str());
-
-        in3D = true;
-
-		alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
-		pos *= ELMOS_TO_METERS;
-		alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
-
-        if (UseAttenuationModel()) {
-            ApplyAttenuationModel(false);
-        } else {
-            if (efx.Enabled()) {
-                efxEnabled = true;
-                alSourcef(id, AL_AIR_ABSORPTION_FACTOR, efx.GetAirAbsorptionFactor());
-                alSource3i(id, AL_AUXILIARY_SEND_FILTER, efx.sfxSlot, 0, AL_FILTER_NULL);
-                alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
-                efxUpdates = efx.updates;
-            }
-
-            curHeightRolloffModifier = heightRolloffModifier;
-            alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier);
-        }
-
-#if defined(__APPLE__) || defined(__OpenBSD__)
-		alSourcef(id, AL_MAX_DISTANCE, 1000000.0f);
-		// Max distance is too small by default on my Mac...
-		ALfloat gain = channel->volume * item->GetGain() * volume;
-		if (gain > 1.0f) {
-			// OpenAL on Mac cannot handle AL_GAIN > 1 well, so we will adjust settings to get the same output with AL_GAIN = 1.
-			const ALint model = alGetInteger(AL_DISTANCE_MODEL);
-			const ALfloat rolloff = ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier;
-			const ALfloat refDist = REFERENCE_DIST * ELMOS_TO_METERS;
-
-			if ((model == AL_INVERSE_DISTANCE_CLAMPED) || (model == AL_INVERSE_DISTANCE)) {
-				alSourcef(id, AL_REFERENCE_DISTANCE, ((gain - 1.0f) * refDist / rolloff) + refDist);
-				alSourcef(id, AL_ROLLOFF_FACTOR, (gain + rolloff - 1.0f) / gain);
-				alSourcef(id, AL_GAIN, 1.0f);
-			}
-		} else {
-			alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
-		}
-#endif
-
-	}
-	alSourcePlay(id);
-
-	if (itemBuffer.GetId() == 0)
-		LOG_L(L_WARNING, "CSoundSource::Play: Empty buffer for item %s (file %s)", item->name.c_str(), itemBuffer.GetFilename().c_str());
-
-	CheckError("CSoundSource::Play");
 }
 
 void CSoundSource::PlayAsync(IAudioChannel* channel, size_t id, float3 pos, float3 velocity, float volume, float priority, bool relative)
@@ -459,7 +482,7 @@ void CSoundSource::UpdateVolume()
 		return;
 	}
 	if (currentSoundItem.id != 0) {
-		alSourcef(id, AL_GAIN, currentVolume * currentSoundItem.volume * currentChannel->volume);
+		alSourcef(id, AL_GAIN, currentVolume * currentSoundItem.randomVolume * currentChannel->volume);
 		return;
 	}
 }

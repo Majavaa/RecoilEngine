@@ -76,7 +76,7 @@ private:
     void DisableSpatialization();
 
     float GetSummedVolume() {
-        return (currentChannel ? currentChannel->volume : 1.0f) * currentSoundItem.volume * currentVolume;
+        return (currentChannel ? currentChannel->volume : 1.0f) * currentSoundItem.randomVolume * currentVolume;
     }
 
 	struct AsyncSoundItemData {
@@ -100,7 +100,7 @@ private:
 		unsigned int loopTime = 0;
 		int priority = 0;
 
-		float volume = 0.0f;
+		float randomVolume = 0.0f;
 		float rolloff = 0.0f;
 	};
 
