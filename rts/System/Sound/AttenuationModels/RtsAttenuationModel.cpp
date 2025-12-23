@@ -13,8 +13,6 @@ SoundAttenuationOutput RtsAttenuationModel::Evaluate(const SoundAttenuationInput
 
     SoundAttenuationOutput out;
 
-    // LOG_L(L_NOTICE, "Evaluating %s", __FILE_NAME__);
-
     // -----------------------------------------------------------------
     // Convert the soundPosition in to camera space and calculate necessary data
     // -----------------------------------------------------------------
@@ -53,8 +51,6 @@ SoundAttenuationOutput RtsAttenuationModel::Evaluate(const SoundAttenuationInput
     // Convert all the positional data to normalized ranges and calculate the final range
     // -----------------------------------------------------------------
 
-    float totalFactor;
-
     {
         // Calculate forward attenuation
         float forwardValue = out.forwardDistance >= 0 ?
@@ -73,7 +69,7 @@ SoundAttenuationOutput RtsAttenuationModel::Evaluate(const SoundAttenuationInput
         float innerValue = 1.0f - t * (OFFCENTER_ATTENUATION_STRENGTH * out.zoomFactor);
 
         // Combine all attenuation factors
-        totalFactor = forwardValue * outerValue * innerValue;
+        out.totalFactor = forwardValue * outerValue * innerValue;
     }
 
     return out;
