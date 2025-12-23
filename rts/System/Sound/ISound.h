@@ -82,9 +82,7 @@ private:
 	static bool IsNullAudio();
 
 public:
-    ISoundAttenuationModel* GetAttenuationModel() { return attenuationModel; }
-private:
-    ISoundAttenuationModel* attenuationModel;
+    virtual ISoundAttenuationModel* GetAttenuationModel() { return nullptr; }
 };
 
 #define sound ISound::GetInstance()

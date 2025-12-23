@@ -77,7 +77,7 @@ public:
 
 	std::vector<std::string> GetSoundDevices() override;
 
-    ISoundAttenuationModel* GetAttenuationModel() { return attenuationModel; }
+    ISoundAttenuationModel* GetAttenuationModel() override { return attenuationModel; }
 
 private:
 	typedef spring::unordered_map<std::string, std::string> SoundItemNameMap;

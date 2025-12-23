@@ -157,6 +157,8 @@ void CCamera::Update(const UpdateParams& p)
 	if (p.updateFrustum)
 		UpdateFrustum();
 
+    TraceToTerrain();
+
 	LoadMatrices();
 	// not done here
 	// LoadViewPort();
