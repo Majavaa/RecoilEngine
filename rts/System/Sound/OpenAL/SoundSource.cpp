@@ -2,39 +2,28 @@
 
 #include "SoundSource.h"
 
-#include <al.h>
-#include <algorithm>
 #include <climits>
 #include <alc.h>
-#include <cmath>
-#include <efx.h>
-#include <tuple>
 
 #include "ALShared.h"
-#include "Game/Camera.h"
 #include "EFX.h"
-#include "Game/Camera.h"
-#include "Game/CameraHandler.h"
-#include "Game/TraceRay.h"
-#include "Rendering/GlobalRendering.h"
-#include "System/Config/ConfigHandler.h"
-#include "System/Log/ILog.h"
-#include "System/Misc/SpringTime.h"
-#include "System/Sound/OpenAL/EFXfuncs.h"
-#include "System/Sound/SoundLog.h"
 #include "System/Sound/IAudioChannel.h"
 #include "MusicStream.h"
+#include "System/Sound/SoundLog.h"
 #include "SoundBuffer.h"
 #include "SoundItem.h"
-
-#include <AL/al.h>
-#include <AL/efx.h>
-
 
 #include "Sound.h" //remove when unified ElmoInMeters
 
 #include "Sim/Misc/GlobalConstants.h"
 #include "System/float3.h"
+#include "System/StringUtil.h"
+#include "System/SpringMath.h"
+
+
+static constexpr float ROLLOFF_FACTOR = 5.0f;
+static constexpr float REFERENCE_DIST = 200.0f;
+
 
 // used to adjust the pitch to the GameSpeed (optional)
 float CSoundSource::globalPitch = 1.0f;
@@ -44,7 +33,6 @@ float CSoundSource::heightRolloffModifier = 1.0f;
 
 void CSoundSource::swap(CSoundSource& r)
 {
-    //TODO makesure all data here is swapped
 	std::swap(id, r.id);
 	std::swap(currentChannel, r.currentChannel);
 	std::swap(curStream, r.curStream);
@@ -66,10 +54,11 @@ CSoundSource::CSoundSource()
 	if (!CheckError("CSoundSource::CSoundSource")) {
 		id = 0;
 	} else {
-		// alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
+		alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
 		CheckError("CSoundSource::CSoundSource");
 	}
 }
+
 
 CSoundSource::CSoundSource(CSoundSource&& src)
 {
@@ -77,8 +66,7 @@ CSoundSource::CSoundSource(CSoundSource&& src)
 	this->swap(src);
 }
 
-CSoundSource& CSoundSource::operator = (CSoundSource&& src)
-{
+CSoundSource& CSoundSource::operator = (CSoundSource&& src) {
 	this->swap(src);
 	return *this;
 }
@@ -86,67 +74,6 @@ CSoundSource& CSoundSource::operator = (CSoundSource&& src)
 CSoundSource::~CSoundSource()
 {
 	Delete();
-}
-
-float SmoothTowards(float current, float target, float speed, float dt)
-{
-    const float t = 1.0f - std::exp(-speed * dt);
-    return current + (target - current) * t;
-}
-
-float Curve(float t, float min, float max, float k)
-{
-    return min + (max - min) * std::pow(t, k);
-}
-
-void CSoundSource::ApplyAttenuationModel(bool smooth)
-{
-    if (!in3D)
-        return;
-
-    if (sound == nullptr) {
-        LOG_L(L_ERROR, "Could not get sound singleton");
-        return;
-    }
-
-    if (sound->GetAttenuationModel() == nullptr) {
-        LOG_L(L_ERROR, "Could not get attenuation model");
-        return;
-    }
-
-    attenuationOutput = sound->GetAttenuationModel()->Evaluate({ currentPosition });
-
-    float totalValue = attenuationOutput.totalFactor;
-
-    if (smooth)
-        curViewportVolumeMultiplier = SmoothTowards(
-            curViewportVolumeMultiplier,
-            totalValue,
-            VIEWPORT_VOLUME_REDUCTION_SPEED,
-            globalRendering->lastFrameTime);
-    else
-        curViewportVolumeMultiplier = totalValue;
-
-    float vol = currentVolume;
-
-    vol = Curve(curViewportVolumeMultiplier, 0.0f, 1.0f, 3);
-
-    if (name.contains("sizzle"))
-        LOG_L(L_NOTICE, "val: %f, vol: %f", totalValue, vol);
-
-    // alSourcef(id, AL_GAIN, vol);
-
-    float filter = 1;
-
-    if (curViewportVolumeMultiplier <= 1.0) {
-        float factor = std::min(curViewportVolumeMultiplier / 1.0f, 1.0f);
-        filter = Curve(factor, 0.1f, 1.0f, 0.75f);
-    }
-
-    // alFilterf(attenuationFilter, AL_LOWPASS_GAIN, 1);
-    // alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, filter);
-    //
-    // alSourcei(id, AL_DIRECT_FILTER, attenuationFilter);
 }
 
 void CSoundSource::Update()
@@ -158,22 +85,18 @@ void CSoundSource::Update()
 	}
 
 	if (currentSoundItem.id != 0) {
-        if (configHandler->GetBool("snd_useAttenuationModel")) {
-            ApplyAttenuationModel(true);
-        } else {
-            if (in3D && (efxEnabled != efx.Enabled())) {
-                alSourcef(id, AL_AIR_ABSORPTION_FACTOR, (efx.Enabled()) ? efx.GetAirAbsorptionFactor() : 0);
-                alSource3i(id, AL_AUXILIARY_SEND_FILTER, (efx.Enabled()) ? efx.sfxSlot : AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
-                alSourcei(id, AL_DIRECT_FILTER, (efx.Enabled()) ? efx.sfxFilter : AL_FILTER_NULL);
-                efxEnabled = efx.Enabled();
-                efxUpdates = efx.updates;
-            }
+		if (in3D && (efxEnabled != efx.Enabled())) {
+			alSourcef(id, AL_AIR_ABSORPTION_FACTOR, (efx.Enabled()) ? efx.GetAirAbsorptionFactor() : 0);
+			alSource3i(id, AL_AUXILIARY_SEND_FILTER, (efx.Enabled()) ? efx.sfxSlot : AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+			alSourcei(id, AL_DIRECT_FILTER, (efx.Enabled()) ? efx.sfxFilter : AL_FILTER_NULL);
+			efxEnabled = efx.Enabled();
+			efxUpdates = efx.updates;
+		}
 
-            if (heightRolloffModifier != curHeightRolloffModifier) {
-                curHeightRolloffModifier = heightRolloffModifier;
-                alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * currentSoundItem.rolloff * heightRolloffModifier);
-            }
-        }
+		if (heightRolloffModifier != curHeightRolloffModifier) {
+			curHeightRolloffModifier = heightRolloffModifier;
+			alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * currentSoundItem.rolloff * heightRolloffModifier);
+		}
 
 		if (!IsPlaying(true) || ((currentSoundItem.loopTime > 0) && (spring_gettime() > loopStop)))
 			Stop();
@@ -188,7 +111,7 @@ void CSoundSource::Update()
 		}
 	}
 
-	if (!configHandler->GetBool("snd_useAttenuationModel") && efxEnabled && (efxUpdates != efx.updates)) {
+	if (efxEnabled && (efxUpdates != efx.updates)) {
 		// airAbsorption & LowPass aren't auto updated by OpenAL on change, so we need to do it per source
 		alSourcef(id, AL_AIR_ABSORPTION_FACTOR, efx.GetAirAbsorptionFactor());
 		alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
@@ -244,6 +167,7 @@ bool CSoundSource::IsPlaying(const bool checkOpenAl) const
 	return (state == AL_PLAYING);
 }
 
+
 void CSoundSource::Stop()
 {
 	alSourceStop(id);
@@ -275,133 +199,94 @@ void CSoundSource::Stop()
 	CheckError("CSoundSource::Stop");
 }
 
-void CSoundSource::Initialize(IAudioChannel* channel, SoundItem* item, float3 pos, float3 velocity, float volume, bool relative)
-{
-    Stop();
-
-    currentVolume = volume;
-    currentSoundItem = { item->soundItemID, item->loopTime, item->priority, item->GetGain(), item->rolloff };
-    currentChannel = channel;
-    in3D = !relative && item->in3D;
-    bufferId = item->GetSoundBufferID();
-    currentPosition = pos;
-
-    const SoundBuffer& itemBuffer = SoundBuffer::GetById(bufferId);
-    alSourcei(id, AL_BUFFER, itemBuffer.GetId());
-
-    float vol = GetSummedVolume();
-
-    LOG_L(L_NOTICE, "name: %s, vol: %f", item->name.c_str(), vol);
-
-    alSourcef(id, AL_GAIN, vol);
-    alSourcef(id, AL_PITCH, item->GetPitch() * globalPitch);
-
-    velocity *= item->dopplerScale * ELMOS_TO_METERS;
-    alSource3f(id, AL_VELOCITY, velocity.x, velocity.y, velocity.z);
-    alSourcei(id, AL_LOOPING, (item->loopTime > 0) ? AL_TRUE : AL_FALSE);
-
-    loopStop = spring_gettime() + spring_msecs(item->loopTime);
-
-	if (in3D) {
-        EnableSpatialization();
-    } else {
-        DisableSpatialization();
-    }
-}
-
-void CSoundSource::EnableSpatialization()
-{
-    const SoundBuffer& itemBuffer = SoundBuffer::GetById(bufferId);
-
-    if (itemBuffer.GetChannels() > 1)
-        LOG_L(L_WARNING, "Can not play non-mono \"%s\" in 3d.", itemBuffer.GetFilename().c_str());
-
-    alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
-    float3 pos = currentPosition * ELMOS_TO_METERS;
-    alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
-
-    if (configHandler->GetBool("snd_useAttenuationModel")) {
-
-        if (attenuationFilter == 0) {
-            alGenFilters(1, &attenuationFilter);
-            alFilteri(attenuationFilter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
-        }
-
-        alFilterf(attenuationFilter, AL_LOWPASS_GAIN, 1);
-        alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, 1);
-
-        ApplyAttenuationModel(false);
-
-    } else {
-        if (efx.Enabled()) {
-            efxEnabled = true;
-            alSourcef(id, AL_AIR_ABSORPTION_FACTOR, efx.GetAirAbsorptionFactor());
-            alSource3i(id, AL_AUXILIARY_SEND_FILTER, efx.sfxSlot, 0, AL_FILTER_NULL);
-            alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
-            efxUpdates = efx.updates;
-        }
-
-        curHeightRolloffModifier = heightRolloffModifier;
-        alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * currentSoundItem.rolloff * heightRolloffModifier);
-    }
-
-#if defined(__APPLE__) || defined(__OpenBSD__)
-    alSourcef(id, AL_MAX_DISTANCE, 1000000.0f);
-    // Max distance is too small by default on my Mac...
-    ALfloat gain = GetSummedVolume();
-    if (gain > 1.0f) {
-        // OpenAL on Mac cannot handle AL_GAIN > 1 well, so we will adjust settings to get the same output with AL_GAIN = 1.
-        const ALint model = alGetInteger(AL_DISTANCE_MODEL);
-        const ALfloat rolloff = ROLLOFF_FACTOR * currentSoundItem.rolloff * heightRolloffModifier;
-        const ALfloat refDist = REFERENCE_DIST * ELMOS_TO_METERS;
-
-        if ((model == AL_INVERSE_DISTANCE_CLAMPED) || (model == AL_INVERSE_DISTANCE)) {
-            alSourcef(id, AL_REFERENCE_DISTANCE, ((gain - 1.0f) * refDist / rolloff) + refDist);
-            alSourcef(id, AL_ROLLOFF_FACTOR, (gain + rolloff - 1.0f) / gain);
-            alSourcef(id, AL_GAIN, 1.0f);
-        }
-    } else {
-        alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
-    }
-#endif
-}
-
-void CSoundSource::DisableSpatialization()
-{
-    alSourcei(id, AL_SOURCE_RELATIVE, AL_TRUE);
-    alSourcef(id, AL_ROLLOFF_FACTOR, 0.f);
-    alSource3f(id, AL_POSITION, 0.0f, 0.0f, -1.0f * ELMOS_TO_METERS);
-
-#if defined(__APPLE__) || defined(__OpenBSD__)
-    alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
-#endif
-
-    if (!efxEnabled)
-        return;
-
-    alSource3i(id, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
-    alSourcei(id, AL_DIRECT_FILTER, AL_FILTER_NULL);
-    efxEnabled = false;
-}
-
 void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, float3 velocity, float volume, bool relative)
 {
-    assert(!curStream);
-    assert(channel);
+	assert(!curStream);
+	assert(channel);
 
-    if (!item->PlayNow())
-        return;
+	if (!item->PlayNow())
+		return;
 
-    Initialize(channel, item, pos, velocity, volume, relative);
+	const SoundBuffer& itemBuffer = SoundBuffer::GetById(item->GetSoundBufferID());
 
+	Stop();
+
+	currentVolume = volume;
+	currentSoundItem = {item->soundItemID,  item->loopTime, item->priority,  item->GetGain(), item->rolloff};
+	currentChannel = channel;
+
+	alSourcei(id, AL_BUFFER, itemBuffer.GetId());
+	alSourcef(id, AL_GAIN, volume * item->GetGain() * channel->volume);
+	alSourcef(id, AL_PITCH, item->GetPitch() * globalPitch);
+
+	velocity *= item->dopplerScale * ELMOS_TO_METERS;
+	alSource3f(id, AL_VELOCITY, velocity.x, velocity.y, velocity.z);
+	alSourcei(id, AL_LOOPING, (item->loopTime > 0) ? AL_TRUE : AL_FALSE);
+
+	loopStop = spring_gettime() + spring_msecs(item->loopTime);
+
+	if (relative || !item->in3D) {
+		in3D = false;
+		if (efxEnabled) {
+			alSource3i(id, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+			alSourcei(id, AL_DIRECT_FILTER, AL_FILTER_NULL);
+			efxEnabled = false;
+		}
+		alSourcei(id, AL_SOURCE_RELATIVE, AL_TRUE);
+		alSourcef(id, AL_ROLLOFF_FACTOR, 0.f);
+		alSource3f(id, AL_POSITION, 0.0f, 0.0f, -1.0f * ELMOS_TO_METERS);
+#if defined(__APPLE__) || defined(__OpenBSD__)
+		alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
+#endif
+	} else {
+		if (itemBuffer.GetChannels() > 1)
+			LOG_L(L_WARNING, "Can not play non-mono \"%s\" in 3d.", itemBuffer.GetFilename().c_str());
+
+		in3D = true;
+		if (efx.Enabled()) {
+			efxEnabled = true;
+			alSourcef(id, AL_AIR_ABSORPTION_FACTOR, efx.GetAirAbsorptionFactor());
+			alSource3i(id, AL_AUXILIARY_SEND_FILTER, efx.sfxSlot, 0, AL_FILTER_NULL);
+			alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
+			efxUpdates = efx.updates;
+		}
+
+		alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
+		pos *= ELMOS_TO_METERS;
+		alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
+		curHeightRolloffModifier = heightRolloffModifier;
+		alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier);
+
+
+#if defined(__APPLE__) || defined(__OpenBSD__)
+		alSourcef(id, AL_MAX_DISTANCE, 1000000.0f);
+		// Max distance is too small by default on my Mac...
+		ALfloat gain = channel->volume * item->GetGain() * volume;
+		if (gain > 1.0f) {
+			// OpenAL on Mac cannot handle AL_GAIN > 1 well, so we will adjust settings to get the same output with AL_GAIN = 1.
+			const ALint model = alGetInteger(AL_DISTANCE_MODEL);
+			const ALfloat rolloff = ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier;
+			const ALfloat refDist = REFERENCE_DIST * ELMOS_TO_METERS;
+
+			if ((model == AL_INVERSE_DISTANCE_CLAMPED) || (model == AL_INVERSE_DISTANCE)) {
+				alSourcef(id, AL_REFERENCE_DISTANCE, ((gain - 1.0f) * refDist / rolloff) + refDist);
+				alSourcef(id, AL_ROLLOFF_FACTOR, (gain + rolloff - 1.0f) / gain);
+				alSourcef(id, AL_GAIN, 1.0f);
+			}
+		} else {
+			alSourcef(id, AL_REFERENCE_DISTANCE, REFERENCE_DIST * ELMOS_TO_METERS);
+		}
+#endif
+
+	}
 	alSourcePlay(id);
 
-    const SoundBuffer& itemBuffer = SoundBuffer::GetById(bufferId);
-    if (bufferId == 0)
-        LOG_L(L_WARNING, "CSoundSource::Play: Empty buffer for item %s (file %s)", item->name.c_str(), itemBuffer.GetFilename().c_str());
+	if (itemBuffer.GetId() == 0)
+		LOG_L(L_WARNING, "CSoundSource::Play: Empty buffer for item %s (file %s)", item->name.c_str(), itemBuffer.GetFilename().c_str());
 
-    CheckError("CSoundSource::Play");
+	CheckError("CSoundSource::Play");
 }
+
 
 void CSoundSource::PlayAsync(IAudioChannel* channel, size_t id, float3 pos, float3 velocity, float volume, float priority, bool relative)
 {
