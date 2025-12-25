@@ -13,8 +13,10 @@ struct SoundAttenuationOutput {
     float outerDistance;
     float frustumHeight;
     float frustumWidth;
+    float volumeFactor;
+    float filterFactor;
+    float tiltFactor;
     float zoomFactor;
-    float totalFactor;
 };
 
 class ISoundAttenuationModel {

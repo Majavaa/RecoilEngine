@@ -103,7 +103,7 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
 
     attenuationOutput = sound->GetAttenuationModel()->Evaluate({ currentPosition });
 
-    float totalValue = attenuationOutput.totalFactor;
+    float totalValue = attenuationOutput.volumeFactor;
 
     if (smooth)
         curViewportVolumeMultiplier = SmoothTowards(
@@ -118,20 +118,27 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
     // new system will treat volume as a normalized range (0-1) so 0.35 is like 35% variable volume which is ridiculous
     // for now, just ignore the randomVolume in the calculations
 
-    float vol = Curve(curViewportVolumeMultiplier, 0.0f, 1.0f, 3) * currentChannel->GetVolume() * currentVolume;
+    //TODO need way more focus on the center of the camera when it comes to sound, maybe the cursor?
+
+    // float vol = Curve(attenuationOutput.volumeFactor, 0.0f, 1.0f, 2) * currentChannel->GetVolume() * currentVolume;
 
     efx.Enabled();
-    alSourcef(id, AL_GAIN, vol);
+    // alSourcef(id, AL_GAIN, vol);
 
-    float filter = 1;
+    // alSourcef(id, AL_GAIN, attenuationOutput.volumeFactor * currentChannel->GetVolume() * currentVolume);
+    alSourcef(id, AL_GAIN, attenuationOutput.volumeFactor * currentChannel->GetVolume());
 
-    if (curViewportVolumeMultiplier <= 1.0) {
-        float factor = std::min(curViewportVolumeMultiplier / 1.0f, 1.0f);
-        filter = Curve(factor, 0.1f, 1.0f, 0.75f);
-    }
+    // float filter = 1;
+
+    // if (curViewportVolumeMultiplier <= 1.0) {
+    //     float factor = std::min(curViewportVolumeMultiplier / 1.0f, 1.0f);
+    //     filter = Curve(factor, 0.1f, 1.0f, 0.75f);
+    // }
+
+    // filter = Curve(attenuationOutput.filterFactor, 0.1f, 1.0f, 0.75f);
 
     alFilterf(attenuationFilter, AL_LOWPASS_GAIN, 1);
-    alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, filter);
+    alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, attenuationOutput.filterFactor);
 
     alSourcei(id, AL_DIRECT_FILTER, attenuationFilter);
 }
@@ -209,7 +216,7 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
     name = item->name;
 
 	alSourcei(id, AL_BUFFER, itemBuffer.GetId());
-	alSourcef(id, AL_GAIN, volume * item->GetGain() * channel->volume);
+	alSourcef(id, AL_GAIN, volume * channel->volume);
 	alSourcef(id, AL_PITCH, item->GetPitch() * globalPitch);
 
 	velocity *= item->dopplerScale * ELMOS_TO_METERS;

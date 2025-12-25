@@ -20,13 +20,17 @@ SoundAttenuationOutput RtsAttenuationModel::Evaluate(const SoundAttenuationInput
     {
         CCamera* playerCamera = CCameraHandler::GetCamera(CCamera::CAMTYPE_PLAYER);
 
+        float terrainDistance = playerCamera->GetTerrainDistance();
+
+        out.zoomFactor = 1 - std::clamp(terrainDistance == -1 ? 1.0f : terrainDistance / GetForwardAttenuationRange(), 0.0f, 1.0f);
+        out.tiltFactor = playerCamera->GetForward().dot(float3(0.0f, -1.0f, 0.0f));
+
         float3 toSound = in.soundPosition - playerCamera->GetPos();
 
         float camForward = playerCamera->GetForward().dot(toSound);
         float camRight = playerCamera->GetRight().dot(toSound);
         float camUp = playerCamera->GetUp().dot(toSound);
 
-        out.innerDistance = sqrt(camRight * camRight + camUp * camUp);
         out.forwardDistance = camForward;
 
         float hfov = playerCamera->GetHFOV() * math::DEG_TO_RAD;
@@ -42,9 +46,6 @@ SoundAttenuationOutput RtsAttenuationModel::Evaluate(const SoundAttenuationInput
         float outsideUp = std::max(0.0f, std::abs(camUp) - out.frustumHeight);
 
         out.outerDistance = std::sqrt(outsideRight * outsideRight + outsideUp * outsideUp);
-
-        float terrainDistance = playerCamera->GetTerrainDistance();
-        out.zoomFactor = std::clamp(terrainDistance == -1 ? 1.0f : terrainDistance / FORWARD_ATTENUATION_RANGE, 0.0f, 1.0f);
     }
 
     // -----------------------------------------------------------------
@@ -53,23 +54,15 @@ SoundAttenuationOutput RtsAttenuationModel::Evaluate(const SoundAttenuationInput
 
     {
         // Calculate forward attenuation
-        float forwardValue = out.forwardDistance >= 0 ?
-            std::clamp(1.0f - out.forwardDistance / FORWARD_ATTENUATION_RANGE, 0.0f, 1.0f) :
-            std::clamp(1.0f - (-out.forwardDistance) / BACKWARD_ATTENUATION_RANGE, 0.0f, 1.0f);
+        float forwardValue = std::clamp(out.forwardDistance >= 0 ?
+            std::lerp(GetMinVolumeAttenuation(), 1.0f, 1.0f - out.forwardDistance / GetForwardAttenuationRange()) :
+            std::clamp(1.0f - (-out.forwardDistance) / GetBackwardAttenuationRange(), 0.0f, 1.0f), GetMinVolumeAttenuation(), 1.0f);
 
         // Calculate outer attenuation
-        float outerValue = std::clamp(1.0f - out.outerDistance / OUTER_ATTENUATION_RANGE, 0.0f, 1.0f);
+        float outerValue = std::clamp(std::lerp(GetMinFilterAttenuation(), 1.0f, 1.0f - out.outerDistance / GetOuterAttenuationRange()), GetMinFilterAttenuation(), 1.0f);
 
-        // Calculate inner attenuation
-        float innerMaxRadius = std::min(out.frustumWidth, out.frustumHeight);
-        float innerMinRadius = innerMaxRadius * OFFCENTER_SAFE_ZONE_RATIO;
-        float t = std::clamp((out.innerDistance - innerMinRadius) / (innerMaxRadius - innerMinRadius), 0.0f, 1.0f);
-
-        // Apply zoom factor to inner attenuation
-        float innerValue = 1.0f - t * (OFFCENTER_ATTENUATION_STRENGTH * out.zoomFactor);
-
-        // Combine all attenuation factors
-        out.totalFactor = forwardValue * outerValue * innerValue;
+        out.volumeFactor = std::pow(forwardValue, 6) * outerValue;
+        out.filterFactor = std::pow(forwardValue, 1) * outerValue;
     }
 
     return out;
