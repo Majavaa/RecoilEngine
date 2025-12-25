@@ -123,6 +123,7 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
     // float vol = Curve(attenuationOutput.volumeFactor, 0.0f, 1.0f, 2) * currentChannel->GetVolume() * currentVolume;
 
     efx.Enabled();
+    efxEnabled = true;
     // alSourcef(id, AL_GAIN, vol);
 
     // alSourcef(id, AL_GAIN, attenuationOutput.volumeFactor * currentChannel->GetVolume() * currentVolume);
