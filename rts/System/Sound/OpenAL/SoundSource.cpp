@@ -3,6 +3,7 @@
 #include "SoundSource.h"
 
 #include <al.h>
+#include <algorithm>
 #include <climits>
 #include <alc.h>
 
@@ -126,15 +127,15 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
     efxEnabled = true;
     // alSourcef(id, AL_GAIN, vol);
 
+    //FIXME sometimes some audio comes in loud and leaves, could be related to not reseting or swaping sound sources right
+    //FIXME 2D events are being affected by filters like the vo
+
+    //FIXME can't just this as many volumes passed in Play are over 1
     // alSourcef(id, AL_GAIN, attenuationOutput.volumeFactor * currentChannel->GetVolume() * currentVolume);
-    alSourcef(id, AL_GAIN, attenuationOutput.volumeFactor * currentChannel->GetVolume());
+
+    alSourcef(id, AL_GAIN, std::clamp(attenuationOutput.volumeFactor * currentChannel->GetVolume(), 0.0f, 1.0f));
 
     // float filter = 1;
-
-    // if (curViewportVolumeMultiplier <= 1.0) {
-    //     float factor = std::min(curViewportVolumeMultiplier / 1.0f, 1.0f);
-    //     filter = Curve(factor, 0.1f, 1.0f, 0.75f);
-    // }
 
     // filter = Curve(attenuationOutput.filterFactor, 0.1f, 1.0f, 0.75f);
 
