@@ -136,7 +136,8 @@ private:
 	std::unique_ptr <MusicStream> curStream;
 
 	float currentVolume = 1.0f;
-    float curViewportVolumeMultiplier = 0;
+    float currentVolumeValue = 0;
+    float currentFilterValue = 0;
 
 	spring_time loopStop {1e9};
     spring_time lastUpdate = spring_gettime();

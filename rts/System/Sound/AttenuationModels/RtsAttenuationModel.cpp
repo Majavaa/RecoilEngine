@@ -3,7 +3,6 @@
 #include "RtsAttenuationModel.h"
 #include "Game/Camera.h"
 #include "Game/CameraHandler.h"
-#include "System/Log/ILog.h"
 #include "System/Sound/ISoundAttenuationModel.h"
 #include "Game/TraceRay.h"
 #include <algorithm>
@@ -49,7 +48,7 @@ SoundAttenuationOutput RtsAttenuationModel::Evaluate(const SoundAttenuationInput
     }
 
     // -----------------------------------------------------------------
-    // Convert all the positional data to normalized ranges and calculate the final range
+    // Convert all the positional data to normalized ranges and calculate the final ranges
     // -----------------------------------------------------------------
 
     {

@@ -104,43 +104,47 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
 
     attenuationOutput = sound->GetAttenuationModel()->Evaluate({ currentPosition });
 
-    float totalValue = attenuationOutput.volumeFactor;
-
-    if (smooth)
-        curViewportVolumeMultiplier = SmoothTowards(
-            curViewportVolumeMultiplier,
-            totalValue,
+    if (smooth) {
+        currentVolumeValue = SmoothTowards(
+            currentVolumeValue,
+            attenuationOutput.volumeFactor,
             VIEWPORT_VOLUME_REDUCTION_SPEED,
             globalRendering->lastFrameTime);
-    else
-        curViewportVolumeMultiplier = totalValue;
+
+        currentFilterValue = SmoothTowards(
+            currentFilterValue,
+            attenuationOutput.filterFactor,
+            VIEWPORT_VOLUME_REDUCTION_SPEED,
+            globalRendering->lastFrameTime);
+    }
+    else {
+        currentVolumeValue = attenuationOutput.volumeFactor;
+        currentFilterValue = attenuationOutput.filterFactor;
+    }
+
+    efx.Enabled();
+    efxEnabled = true;
 
     //TODO currentSoundItem.randomVolume is quite overtuned on many things (0.35 for example)
     // new system will treat volume as a normalized range (0-1) so 0.35 is like 35% variable volume which is ridiculous
     // for now, just ignore the randomVolume in the calculations
 
-    //TODO need way more focus on the center of the camera when it comes to sound, maybe the cursor?
-
-    // float vol = Curve(attenuationOutput.volumeFactor, 0.0f, 1.0f, 2) * currentChannel->GetVolume() * currentVolume;
-
-    efx.Enabled();
-    efxEnabled = true;
-    // alSourcef(id, AL_GAIN, vol);
-
-    //FIXME sometimes some audio comes in loud and leaves, could be related to not reseting or swaping sound sources right
     //FIXME 2D events are being affected by filters like the vo
 
-    //FIXME can't just this as many volumes passed in Play are over 1
+    //FIXME can't just do this as many volumes passed in Play are over 1
+    // need to figure out what the best solution is for converting existing values to new system
+    //
+
     // alSourcef(id, AL_GAIN, attenuationOutput.volumeFactor * currentChannel->GetVolume() * currentVolume);
 
     alSourcef(id, AL_GAIN, std::clamp(attenuationOutput.volumeFactor * currentChannel->GetVolume(), 0.0f, 1.0f));
 
-    // float filter = 1;
+    float gain;
 
-    // filter = Curve(attenuationOutput.filterFactor, 0.1f, 1.0f, 0.75f);
+    alGetSourcef(id, AL_GAIN, &gain);
 
     alFilterf(attenuationFilter, AL_LOWPASS_GAIN, 1);
-    alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, attenuationOutput.filterFactor);
+    alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, currentFilterValue);
 
     alSourcei(id, AL_DIRECT_FILTER, attenuationFilter);
 }
@@ -307,11 +311,11 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
 
 	alSourcePlay(id);
 
-    if (name.contains("lasrfir")) {
-        float finalVol = 0;
-        alGetSourcefv(id, AL_GAIN, &finalVol);
-        LOG_L(L_NOTICE, "finalVol: %.2f", finalVol);
-    }
+    float gain;
+    alGetSourcef(id, AL_GAIN, &gain);
+
+    if (gain >= 0.9)
+        LOG_L(L_WARNING, "Gain was suspiciously high: %s, at %f", name.c_str(), gain);
 
 	if (itemBuffer.GetId() == 0)
 		LOG_L(L_WARNING, "CSoundSource::Play: Empty buffer for item %s (file %s)", item->name.c_str(), itemBuffer.GetFilename().c_str());
@@ -491,7 +495,11 @@ void CSoundSource::UpdateVolume()
 		return;
 	}
 	if (currentSoundItem.id != 0) {
-		alSourcef(id, AL_GAIN, currentVolume * currentSoundItem.randomVolume * currentChannel->volume);
+        if (UseAttenuationModel()) {
+            ApplyAttenuationModel(false);
+            return;
+        }
+        alSourcef(id, AL_GAIN, currentVolume * currentSoundItem.randomVolume * currentChannel->volume);
 		return;
 	}
 }
