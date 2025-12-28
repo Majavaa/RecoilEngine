@@ -309,9 +309,6 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
     float gain;
     alGetSourcef(id, AL_GAIN, &gain);
 
-    if (gain >= 0.9)
-        LOG_L(L_WARNING, "Gain was suspiciously high: %s, at %f", name.c_str(), gain);
-
 	if (itemBuffer.GetId() == 0)
 		LOG_L(L_WARNING, "CSoundSource::Play: Empty buffer for item %s (file %s)", item->name.c_str(), itemBuffer.GetFilename().c_str());
 
@@ -324,6 +321,9 @@ void CSoundSource::Delete()
 		alSource3i(id, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
 		alSourcei(id, AL_DIRECT_FILTER, AL_FILTER_NULL);
 	}
+
+    if (attenuationFilter != 0)
+        alDeleteFilters(id, &attenuationFilter);
 
 	Stop();
 	alDeleteSources(1, &id);
