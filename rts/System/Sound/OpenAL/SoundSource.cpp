@@ -323,7 +323,7 @@ void CSoundSource::Delete()
 	}
 
     if (attenuationFilter != 0)
-        alDeleteFilters(id, &attenuationFilter);
+        alDeleteFilters(1, &attenuationFilter);
 
 	Stop();
 	alDeleteSources(1, &id);
