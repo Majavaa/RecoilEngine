@@ -44,6 +44,8 @@
 
 #include "System/float3.h"
 
+#include "Rendering/GL/glExtra.h"
+
 
 spring::recursive_mutex soundMutex;
 
@@ -57,7 +59,6 @@ CSound::~CSound()
 {
 	configHandler->RemoveObserver(this);
 }
-
 
 void CSound::Init()
 {
@@ -79,6 +80,8 @@ void CSound::Init()
 		updateListener = false;
 		soundThreadQuit = false;
 		canLoadDefs = false;
+
+        attenuationModel = new RtsAttenuationModel();
 	}
 	{
 		Channels::General->SetVolume(configHandler->GetInt("snd_volgeneral") * 0.01f);
@@ -120,6 +123,9 @@ void CSound::Kill()
 		if (soundThread.joinable())
 			soundThread.join();
 	}
+
+    delete attenuationModel;
+    attenuationModel = nullptr;
 
 	SoundBuffer::Deinitialise();
 }
@@ -358,7 +364,7 @@ void CSound::DeviceChanged(uint32_t sdlDeviceIndex)
 	// In these cases, no event is emitted — SDL2 switches the active audio device internally through the OS-specific audio backend (WASAPI, PulseAudio, etc.).
 	// However, with certain device changes a short dropout may occur, and SDL2 will emit the SDL_AUDIODEVICEREMOVED event.
 	// Shortly afterwards, the default device can usually be reinitialized.
-	
+
 	// This behavior can be reproduced on several test systems, for example when switching the Windows default device from monitor audio over HDMI to a sound card (HDMI->analog)
 
 	std::lock_guard<spring::recursive_mutex> lck(soundMutex);
@@ -513,7 +519,7 @@ bool CSound::OpenSdlDevice(const std::string& deviceName, SDL_AudioSpec& obtaine
 	desiredSpec.samples = 4096;
 	desiredSpec.callback = RenderSDLSamples;
 	desiredSpec.userdata = this;
-	
+
 	/* SDL bug: can return devices with >2 channels (3D surround), even if we ask for just 2.
 	 * This causes the 2 "primary" channels to be moved in the 3D space compared to their "normal" state
 	 * and directional sound doesn't work anymore (though volume change with distance still does).
@@ -1108,3 +1114,23 @@ std::vector<std::string> CSound::GetSoundDevices()
 	}
 	return devices;
 }
+
+void CSound::DrawDebug() const
+{
+    // Only draw 3D sound sources that are currently playing
+    for (const CSoundSource& source: soundSources) {
+        // Use your extracted data functions instead of OpenAL calls
+        if (source.IsPlaying(false) && source.IsIn3D()) {
+            // Get position using your accessor methods instead of OpenAL calls
+            float3 pos = source.GetPosition();  // Use your implemented accessor
+
+            // Draw a wireframe sphere at the sound source position
+            float color[4] = {1.0f, 0.0f, 0.0f, 0.7f}; // Red with some transparency
+            CMatrix44f matrix;
+            matrix.Translate(pos.x, pos.y, pos.z);
+            matrix.Scale(CSoundSource::REFERENCE_DIST * ELMOS_TO_METERS); // Adjusted scale for better visibility
+            GL::shapes.DrawWireSphere(8, 8, matrix, color);
+        }
+    }
+}
+

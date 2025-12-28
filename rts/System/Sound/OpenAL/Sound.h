@@ -10,6 +10,7 @@
 #include <alc.h>
 #include <SDL.h>
 
+#include "System/Sound/AttenuationModels/RtsAttenuationModel.h"
 #include "System/Sound/ISound.h"
 #include "System/float3.h"
 #include "System/UnorderedMap.hpp"
@@ -25,6 +26,8 @@ class SoundItem;
 /// Default sound system implementation (OpenAL)
 class CSound : public ISound
 {
+public:
+	void DrawDebug() const;  // Debug visualization method
 public:
 	CSound();
 	~CSound();
@@ -73,6 +76,9 @@ public:
 	int GetFrameSize() const { return frameSize; }
 
 	std::vector<std::string> GetSoundDevices() override;
+
+    ISoundAttenuationModel* GetAttenuationModel() override { return attenuationModel; }
+
 private:
 	typedef spring::unordered_map<std::string, std::string> SoundItemNameMap;
 	typedef spring::unordered_map<std::string, SoundItemNameMap> SoundItemDefsMap;
@@ -102,6 +108,8 @@ private:
 	bool hasAlcSoftLoopBack = false;
 
 	std::string selectedDeviceName = "";
+
+    ISoundAttenuationModel* attenuationModel = nullptr;
 
 	spring::thread soundThread;
 	spring::unordered_map<std::string, size_t> soundMap; // <name, id>

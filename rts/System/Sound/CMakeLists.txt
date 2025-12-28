@@ -8,6 +8,7 @@ set(noSoundSources
 		ISound.cpp
 		Null/SoundChannels.cpp
 		Null/NullSound.cpp
+        AttenuationModels/RtsAttenuationModel.cpp
 	)
 
 add_library(no-sound STATIC EXCLUDE_FROM_ALL ${noSoundSources})
@@ -42,6 +43,7 @@ if    (NOT NO_SOUND)
 			OpenAL/SoundItem.cpp
 			OpenAL/SoundSource.cpp
 			OpenAL/VorbisShared.cpp
+            AttenuationModels/RtsAttenuationModel.cpp
 		)
 
 	find_package_static(OpenAL 1.18.2 REQUIRED)

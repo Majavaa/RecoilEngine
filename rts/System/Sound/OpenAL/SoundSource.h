@@ -8,11 +8,12 @@
 
 #include <al.h>
 
-#include "System/Misc/NonCopyable.h"
+#include "System/Config/ConfigHandler.h"
 #include "System/Misc/SpringTime.h"
+#include "System/Sound/IAudioChannel.h"
+#include "System/Sound/ISoundAttenuationModel.h"
 #include "System/float3.h"
 
-class IAudioChannel;
 class SoundItem;
 class MusicStream;
 
@@ -33,8 +34,13 @@ public:
 	CSoundSource& operator = (CSoundSource&& src);
 	CSoundSource& operator = (const CSoundSource& src) = delete;
 
+    static constexpr float ROLLOFF_FACTOR = 5.0f;
+    static constexpr float REFERENCE_DIST = 200.0f;
+
 	void Update();
 	void Delete();
+
+    void ApplyAttenuationModel(const bool smooth);
 
 	void UpdateVolume();
 	bool IsValid() const { return (id != 0); };
@@ -51,12 +57,27 @@ public:
 	void StreamPause();
 	float GetStreamTime();
 	float GetStreamPlayTime();
+    void ComputeCameraSpaceData();
 
 	static void SetPitch(const float& newPitch) { globalPitch = newPitch; }
 	static void SetHeightRolloffModifer(const float& mod) { heightRolloffModifier = mod; }
 
+    bool IsIn3D() const { return in3D; }
+    float3 GetPosition() const { return currentPosition; }
+    ALuint GetId() const { return id; }
+
+    static constexpr float VIEWPORT_VOLUME_REDUCTION_SPEED = 0.02f;
+
 private:
 	void swap(CSoundSource& other);
+
+    void Initialize(IAudioChannel* channel, SoundItem* item, float3 pos, float3 velocity, float volume, bool relative);
+    void EnableSpatialization();
+    void DisableSpatialization();
+
+    float GetSummedVolume() {
+        return (currentChannel ? currentChannel->volume : 1.0f) * currentSoundItem.randomVolume * currentVolume;
+    }
 
 	struct AsyncSoundItemData {
 		IAudioChannel* channel = nullptr;
@@ -79,7 +100,7 @@ private:
 		unsigned int loopTime = 0;
 		int priority = 0;
 
-		float rndGain = 0.0f;
+		float randomVolume = 0.0f;
 		float rolloff = 0.0f;
 	};
 
@@ -93,19 +114,36 @@ private:
 private:
 	ALuint id = 0;
 
-	SoundItemData curPlayingItem;
+    ALuint attenuationFilter = 0;
+
+    SoundAttenuationOutput attenuationOutput;
+
+    float cameraZoom;
+
+    float3 currentPosition = float3(0.0f, 0.0f, 0.0f);
+
+	SoundItemData currentSoundItem;
 	AsyncSoundItemData asyncPlayItem;
 
-	IAudioChannel* curChannel = nullptr;
+	IAudioChannel* currentChannel = nullptr;
 	std::unique_ptr <MusicStream> curStream;
 
-	float curVolume = 1.0f;
+	float currentVolume = 1.0f;
+    float currentVolumeValue = 0;
+    float currentFilterValue = 0;
+
 	spring_time loopStop {1e9};
+    spring_time lastUpdate = spring_gettime();
 	bool in3D = false;
 	bool efxEnabled = false;
 	int efxUpdates = 0;
 
+    std::string name;
+
 	ALfloat curHeightRolloffModifier = 1.0f;
+
+    bool UseAttenuationModel() { return configHandler->GetBool("snd_useAttenuationModel"); }
 };
 
 #endif
+

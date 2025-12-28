@@ -3,6 +3,7 @@
 #ifndef _I_SOUND_H_
 #define _I_SOUND_H_
 
+#include "System/Sound/ISoundAttenuationModel.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -79,6 +80,9 @@ public:
 private:
 	virtual bool LoadSoundDefsImpl(LuaParser* defsParser) = 0;
 	static bool IsNullAudio();
+
+public:
+    virtual ISoundAttenuationModel* GetAttenuationModel() { return nullptr; }
 };
 
 #define sound ISound::GetInstance()

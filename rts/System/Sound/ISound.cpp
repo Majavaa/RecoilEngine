@@ -40,6 +40,12 @@ CONFIG(float, snd_airAbsorption).defaultValue(0.1f);
 
 CONFIG(std::string, snd_device).defaultValue("").description("Sets the used output device. See \"Available Devices\" section in infolog.txt.");
 
+CONFIG(bool, snd_useAttenuationModel).defaultValue(false).description("Use the new AttenuationModel system. Affects how you hear 3D sounds in the game. Recommended: ON");
+CONFIG(float, snd_forwardAttenuationRange).defaultValue(8000).description("Distance in front of the camera over which sound volume and clarity gradually fade.");
+CONFIG(float, snd_backwardAttenuationRange).defaultValue(300).description("Distance behind the camera over which sounds are attenuated.");
+CONFIG(float, snd_outerAttenuationRange).defaultValue(500).description("How far sounds can be outside the camera view before being strongly attenuated.");
+CONFIG(float, snd_minVolumeAttenuation).defaultValue(0.0f).minimumValue(0).maximumValue(1).description("Minimum volume multiplier for attenuated sounds to prevent them from becoming silent. Smaller is quieter");
+CONFIG(float, snd_minFilterAttenuation).defaultValue(0.05f).minimumValue(0).maximumValue(1).description("Minimum clarity level for attenuated sounds, controlling how muffled distant sounds become. Smaller numbers meaning more filtered");
 
 
 #ifndef NO_SOUND

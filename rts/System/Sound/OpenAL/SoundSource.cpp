@@ -2,13 +2,17 @@
 
 #include "SoundSource.h"
 
+#include <al.h>
+#include <algorithm>
 #include <climits>
 #include <alc.h>
 
 #include "ALShared.h"
 #include "EFX.h"
+#include "Rendering/GlobalRendering.h"
 #include "System/Sound/IAudioChannel.h"
 #include "MusicStream.h"
+#include "System/Sound/OpenAL/EFXfuncs.h"
 #include "System/Sound/SoundLog.h"
 #include "SoundBuffer.h"
 #include "SoundItem.h"
@@ -17,13 +21,6 @@
 
 #include "Sim/Misc/GlobalConstants.h"
 #include "System/float3.h"
-#include "System/StringUtil.h"
-#include "System/SpringMath.h"
-
-
-static constexpr float ROLLOFF_FACTOR = 5.0f;
-static constexpr float REFERENCE_DIST = 200.0f;
-
 
 // used to adjust the pitch to the GameSpeed (optional)
 float CSoundSource::globalPitch = 1.0f;
@@ -34,16 +31,16 @@ float CSoundSource::heightRolloffModifier = 1.0f;
 void CSoundSource::swap(CSoundSource& r)
 {
 	std::swap(id, r.id);
-	std::swap(curChannel, r.curChannel);
+	std::swap(currentChannel, r.currentChannel);
 	std::swap(curStream, r.curStream);
-	std::swap(curVolume, r.curVolume);
+	std::swap(currentVolume, r.currentVolume);
 	std::swap(loopStop, r.loopStop);
 	std::swap(in3D, r.in3D);
 	std::swap(efxEnabled, r.efxEnabled);
 	std::swap(efxUpdates, r.efxUpdates);
 	std::swap(curHeightRolloffModifier, r.curHeightRolloffModifier);
 
-	std::swap(curPlayingItem, r.curPlayingItem);
+	std::swap(currentSoundItem, r.currentSoundItem);
 	std::swap(asyncPlayItem, r.asyncPlayItem);
 }
 
@@ -58,7 +55,6 @@ CSoundSource::CSoundSource()
 		CheckError("CSoundSource::CSoundSource");
 	}
 }
-
 
 CSoundSource::CSoundSource(CSoundSource&& src)
 {
@@ -76,6 +72,78 @@ CSoundSource::~CSoundSource()
 	Delete();
 }
 
+float SmoothTowards(float current, float target, float speed, float dt)
+{
+    const float t = 1.0f - std::exp(-speed * dt);
+    return current + (target - current) * t;
+}
+
+float Curve(float t, float min, float max, float k)
+{
+    return min + (max - min) * std::pow(t, k);
+}
+
+void CSoundSource::ApplyAttenuationModel(bool smooth)
+{
+    if (!in3D)
+        return;
+
+    if (sound == nullptr) {
+        LOG_L(L_ERROR, "Could not get sound singleton");
+        return;
+    }
+
+    if (sound->GetAttenuationModel() == nullptr) {
+        LOG_L(L_ERROR, "Could not get attenuation model");
+        return;
+    }
+
+    attenuationOutput = sound->GetAttenuationModel()->Evaluate({ currentPosition });
+
+    if (smooth) {
+        currentVolumeValue = SmoothTowards(
+            currentVolumeValue,
+            attenuationOutput.volumeFactor,
+            VIEWPORT_VOLUME_REDUCTION_SPEED,
+            globalRendering->lastFrameTime);
+
+        currentFilterValue = SmoothTowards(
+            currentFilterValue,
+            attenuationOutput.filterFactor,
+            VIEWPORT_VOLUME_REDUCTION_SPEED,
+            globalRendering->lastFrameTime);
+    }
+    else {
+        currentVolumeValue = attenuationOutput.volumeFactor;
+        currentFilterValue = attenuationOutput.filterFactor;
+    }
+
+    efx.Enable();
+    efxEnabled = true;
+
+    //TODO currentSoundItem.randomVolume is quite overtuned on many things (0.35 for example)
+    // new system will treat volume as a normalized range (0-1) so 0.35 is like 35% variable volume which is ridiculous
+    // for now, just ignore the randomVolume in the calculations
+
+    //FIXME 2D events are being affected by filters like the vo
+
+    //FIXME can't just do this as many volumes passed in Play are over 1
+    // need to figure out what the best solution is for converting existing values to new system
+
+    // alSourcef(id, AL_GAIN, attenuationOutput.volumeFactor * currentChannel->GetVolume() * currentVolume);
+
+    alSourcef(id, AL_GAIN, std::clamp(attenuationOutput.volumeFactor * currentChannel->GetVolume(), 0.0f, 1.0f));
+
+    float gain;
+
+    alGetSourcef(id, AL_GAIN, &gain);
+
+    alFilterf(attenuationFilter, AL_LOWPASS_GAIN, 1);
+    alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, currentFilterValue);
+
+    alSourcei(id, AL_DIRECT_FILTER, attenuationFilter);
+}
+
 void CSoundSource::Update()
 {
 	if (asyncPlayItem.id != 0) {
@@ -84,21 +152,25 @@ void CSoundSource::Update()
 		asyncPlayItem = AsyncSoundItemData();
 	}
 
-	if (curPlayingItem.id != 0) {
-		if (in3D && (efxEnabled != efx.Enabled())) {
-			alSourcef(id, AL_AIR_ABSORPTION_FACTOR, (efx.Enabled()) ? efx.GetAirAbsorptionFactor() : 0);
-			alSource3i(id, AL_AUXILIARY_SEND_FILTER, (efx.Enabled()) ? efx.sfxSlot : AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
-			alSourcei(id, AL_DIRECT_FILTER, (efx.Enabled()) ? efx.sfxFilter : AL_FILTER_NULL);
-			efxEnabled = efx.Enabled();
-			efxUpdates = efx.updates;
-		}
+	if (currentSoundItem.id != 0) {
+        if (UseAttenuationModel()) {
+            ApplyAttenuationModel(true);
+        } else {
+            if (in3D && (efxEnabled != efx.Enabled())) {
+                alSourcef(id, AL_AIR_ABSORPTION_FACTOR, (efx.Enabled()) ? efx.GetAirAbsorptionFactor() : 0);
+                alSource3i(id, AL_AUXILIARY_SEND_FILTER, (efx.Enabled()) ? efx.sfxSlot : AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+                alSourcei(id, AL_DIRECT_FILTER, (efx.Enabled()) ? efx.sfxFilter : AL_FILTER_NULL);
+                efxEnabled = efx.Enabled();
+                efxUpdates = efx.updates;
+            }
 
-		if (heightRolloffModifier != curHeightRolloffModifier) {
-			curHeightRolloffModifier = heightRolloffModifier;
-			alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * curPlayingItem.rolloff * heightRolloffModifier);
-		}
+            if (heightRolloffModifier != curHeightRolloffModifier) {
+                curHeightRolloffModifier = heightRolloffModifier;
+                alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * currentSoundItem.rolloff * heightRolloffModifier);
+            }
+        }
 
-		if (!IsPlaying(true) || ((curPlayingItem.loopTime > 0) && (spring_gettime() > loopStop)))
+		if (!IsPlaying(true) || ((currentSoundItem.loopTime > 0) && (spring_gettime() > loopStop)))
 			Stop();
 	}
 
@@ -111,93 +183,12 @@ void CSoundSource::Update()
 		}
 	}
 
-	if (efxEnabled && (efxUpdates != efx.updates)) {
+	if (!UseAttenuationModel() && efxEnabled && (efxUpdates != efx.updates)) {
 		// airAbsorption & LowPass aren't auto updated by OpenAL on change, so we need to do it per source
 		alSourcef(id, AL_AIR_ABSORPTION_FACTOR, efx.GetAirAbsorptionFactor());
 		alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
 		efxUpdates = efx.updates;
 	}
-}
-
-void CSoundSource::Delete()
-{
-	if (efxEnabled) {
-		alSource3i(id, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
-		alSourcei(id, AL_DIRECT_FILTER, AL_FILTER_NULL);
-	}
-
-	Stop();
-	alDeleteSources(1, &id);
-	CheckError("CSoundSource::Delete");
-}
-
-
-int CSoundSource::GetCurrentPriority() const
-{
-	if (asyncPlayItem.id != 0)
-		return asyncPlayItem.priority;
-
-	if (curStream)
-		return INT_MAX;
-
-	if (curPlayingItem.id == 0)
-		return INT_MIN;
-
-	return (curPlayingItem.priority);
-}
-
-bool CSoundSource::IsPlaying(const bool checkOpenAl) const
-{
-	if (curStream)
-		return true;
-
-	if (asyncPlayItem.id != 0)
-		return true;
-
-	if (curPlayingItem.id == 0)
-		return false;
-
-	// calling OpenAL has a high chance of generating a L2 cache miss, avoid if possible
-	if (!checkOpenAl)
-		return true;
-
-	CheckError("CSoundSource::IsPlaying");
-	ALint state;
-	alGetSourcei(id, AL_SOURCE_STATE, &state);
-	CheckError("CSoundSource::IsPlaying");
-	return (state == AL_PLAYING);
-}
-
-
-void CSoundSource::Stop()
-{
-	alSourceStop(id);
-
-	{
-		SoundItem* item = nullptr;
-
-		// callers marked * are mutex-guarded
-		//   ::Delete via ~CSoundSource via CSound::Kill
-		//   ::Play via ::Update (*)
-		//   ::PlayStream via AudioChannel::StreamPlay (*)
-		//   ::StreamStop via AudioChannel::StreamStop (*)
-		//   AudioChannel::FindSourceAndPlay (*)
-		if (sound != nullptr)
-			item = sound->GetSoundItem(curPlayingItem.id);
-		if (item != nullptr)
-			item->StopPlay();
-
-		curPlayingItem = {};
-	}
-
-	curStream.reset();
-
-	if (curChannel != nullptr) {
-		IAudioChannel* oldChannel = curChannel;
-		curChannel = nullptr;
-		oldChannel->SoundSourceFinished(this);
-	}
-	CheckError("CSoundSource::Stop");
 }
 
 void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, float3 velocity, float volume, bool relative)
@@ -212,12 +203,21 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
 
 	Stop();
 
-	curVolume = volume;
-	curPlayingItem = {item->soundItemID,  item->loopTime, item->priority,  item->GetGain(), item->rolloff};
-	curChannel = channel;
+	currentVolume = volume;
+    currentSoundItem = {
+        item->soundItemID,
+        item->loopTime,
+        item->priority,
+        item->GetGain(),
+        item->rolloff
+    };
+	currentChannel = channel;
+    currentPosition = pos;
+
+    name = item->name;
 
 	alSourcei(id, AL_BUFFER, itemBuffer.GetId());
-	alSourcef(id, AL_GAIN, volume * item->GetGain() * channel->volume);
+	alSourcef(id, AL_GAIN, volume * channel->volume);
 	alSourcef(id, AL_PITCH, item->GetPitch() * globalPitch);
 
 	velocity *= item->dopplerScale * ELMOS_TO_METERS;
@@ -243,21 +243,44 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
 		if (itemBuffer.GetChannels() > 1)
 			LOG_L(L_WARNING, "Can not play non-mono \"%s\" in 3d.", itemBuffer.GetFilename().c_str());
 
-		in3D = true;
-		if (efx.Enabled()) {
-			efxEnabled = true;
-			alSourcef(id, AL_AIR_ABSORPTION_FACTOR, efx.GetAirAbsorptionFactor());
-			alSource3i(id, AL_AUXILIARY_SEND_FILTER, efx.sfxSlot, 0, AL_FILTER_NULL);
-			alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
-			efxUpdates = efx.updates;
-		}
+        in3D = true;
 
 		alSourcei(id, AL_SOURCE_RELATIVE, AL_FALSE);
 		pos *= ELMOS_TO_METERS;
 		alSource3f(id, AL_POSITION, pos.x, pos.y, pos.z);
-		curHeightRolloffModifier = heightRolloffModifier;
-		alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier);
 
+        if (UseAttenuationModel()) {
+
+            efx.Enable();
+            if (attenuationFilter == 0) {
+                alGenFilters(1, &attenuationFilter);
+                alFilteri(attenuationFilter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
+            }
+
+            // Need to disable physics based attenuation
+            alSourcef(id, AL_AIR_ABSORPTION_FACTOR, 0);
+            alSourcef(id, AL_REFERENCE_DISTANCE, 0);
+            alSourcef(id, AL_ROLLOFF_FACTOR, 0);
+
+            alFilterf(attenuationFilter, AL_LOWPASS_GAIN, 1);
+            alFilterf(attenuationFilter, AL_LOWPASS_GAINHF, 1);
+
+            alSourcei(id, AL_DIRECT_FILTER, attenuationFilter);
+
+            ApplyAttenuationModel(false);
+
+        } else {
+            if (efx.Enabled()) {
+                efxEnabled = true;
+                alSourcef(id, AL_AIR_ABSORPTION_FACTOR, efx.GetAirAbsorptionFactor());
+                alSource3i(id, AL_AUXILIARY_SEND_FILTER, efx.sfxSlot, 0, AL_FILTER_NULL);
+                alSourcei(id, AL_DIRECT_FILTER, efx.sfxFilter);
+                efxUpdates = efx.updates;
+            }
+
+            curHeightRolloffModifier = heightRolloffModifier;
+            alSourcef(id, AL_ROLLOFF_FACTOR, ROLLOFF_FACTOR * item->rolloff * heightRolloffModifier);
+        }
 
 #if defined(__APPLE__) || defined(__OpenBSD__)
 		alSourcef(id, AL_MAX_DISTANCE, 1000000.0f);
@@ -280,7 +303,11 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
 #endif
 
 	}
+
 	alSourcePlay(id);
+
+    float gain;
+    alGetSourcef(id, AL_GAIN, &gain);
 
 	if (itemBuffer.GetId() == 0)
 		LOG_L(L_WARNING, "CSoundSource::Play: Empty buffer for item %s (file %s)", item->name.c_str(), itemBuffer.GetFilename().c_str());
@@ -288,6 +315,87 @@ void CSoundSource::Play(IAudioChannel* channel, SoundItem* item, float3 pos, flo
 	CheckError("CSoundSource::Play");
 }
 
+void CSoundSource::Delete()
+{
+	if (efxEnabled) {
+		alSource3i(id, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+		alSourcei(id, AL_DIRECT_FILTER, AL_FILTER_NULL);
+	}
+
+    if (attenuationFilter != 0)
+        alDeleteFilters(1, &attenuationFilter);
+
+	Stop();
+	alDeleteSources(1, &id);
+	CheckError("CSoundSource::Delete");
+}
+
+int CSoundSource::GetCurrentPriority() const
+{
+	if (asyncPlayItem.id != 0)
+		return asyncPlayItem.priority;
+
+	if (curStream)
+		return INT_MAX;
+
+	if (currentSoundItem.id == 0)
+		return INT_MIN;
+
+	return (currentSoundItem.priority);
+}
+
+bool CSoundSource::IsPlaying(const bool checkOpenAl) const
+{
+	if (curStream)
+		return true;
+
+	if (asyncPlayItem.id != 0)
+		return true;
+
+	if (currentSoundItem.id == 0)
+		return false;
+
+	// calling OpenAL has a high chance of generating a L2 cache miss, avoid if possible
+	if (!checkOpenAl)
+		return true;
+
+	CheckError("CSoundSource::IsPlaying");
+	ALint state;
+	alGetSourcei(id, AL_SOURCE_STATE, &state);
+	CheckError("CSoundSource::IsPlaying");
+	return (state == AL_PLAYING);
+}
+
+void CSoundSource::Stop()
+{
+	alSourceStop(id);
+
+	{
+		SoundItem* item = nullptr;
+
+		// callers marked * are mutex-guarded
+		//   ::Delete via ~CSoundSource via CSound::Kill
+		//   ::Play via ::Update (*)
+		//   ::PlayStream via AudioChannel::StreamPlay (*)
+		//   ::StreamStop via AudioChannel::StreamStop (*)
+		//   AudioChannel::FindSourceAndPlay (*)
+		if (sound != nullptr)
+			item = sound->GetSoundItem(currentSoundItem.id);
+		if (item != nullptr)
+			item->StopPlay();
+
+		currentSoundItem = {};
+	}
+
+	curStream.reset();
+
+	if (currentChannel != nullptr) {
+		IAudioChannel* oldChannel = currentChannel;
+		currentChannel = nullptr;
+		oldChannel->SoundSourceFinished(this);
+	}
+	CheckError("CSoundSource::Stop");
+}
 
 void CSoundSource::PlayAsync(IAudioChannel* channel, size_t id, float3 pos, float3 velocity, float volume, float priority, bool relative)
 {
@@ -303,7 +411,6 @@ void CSoundSource::PlayAsync(IAudioChannel* channel, size_t id, float3 pos, floa
 	asyncPlayItem.relative = relative;
 }
 
-
 void CSoundSource::PlayStream(IAudioChannel* channel, const std::string& file, float volume)
 {
 	// stop any current playback
@@ -313,8 +420,8 @@ void CSoundSource::PlayStream(IAudioChannel* channel, const std::string& file, f
 		curStream = std::make_unique <MusicStream> ();
 
 	// OpenAL params
-	curChannel = channel;
-	curVolume = volume;
+	currentChannel = channel;
+	currentVolume = volume;
 	in3D = false;
 
 	if (efxEnabled) {
@@ -375,15 +482,19 @@ float CSoundSource::GetStreamPlayTime()
 
 void CSoundSource::UpdateVolume()
 {
-	if (curChannel == nullptr)
+	if (currentChannel == nullptr)
 		return;
 
 	if (curStream) {
-		alSourcef(id, AL_GAIN, curVolume * curChannel->volume);
+		alSourcef(id, AL_GAIN, currentVolume * currentChannel->volume);
 		return;
 	}
-	if (curPlayingItem.id != 0) {
-		alSourcef(id, AL_GAIN, curVolume * curPlayingItem.rndGain * curChannel->volume);
+	if (currentSoundItem.id != 0) {
+        if (UseAttenuationModel()) {
+            ApplyAttenuationModel(false);
+            return;
+        }
+        alSourcef(id, AL_GAIN, currentVolume * currentSoundItem.randomVolume * currentChannel->volume);
 		return;
 	}
 }
