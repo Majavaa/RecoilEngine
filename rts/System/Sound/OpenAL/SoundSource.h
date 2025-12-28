@@ -115,15 +115,8 @@ private:
 	ALuint id = 0;
 
     ALuint attenuationFilter = 0;
-    float outerDistance = 0;
-    float innerDistance = 0;
-    float forwardDistance = 0;
-    float2 viewportHalfExtents = float2();
-    float terrainDistance;
 
     SoundAttenuationOutput attenuationOutput;
-
-    float bufferId = 0;
 
     float cameraZoom;
 

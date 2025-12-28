@@ -109,7 +109,7 @@ private:
 
 	std::string selectedDeviceName = "";
 
-    ISoundAttenuationModel* attenuationModel;
+    ISoundAttenuationModel* attenuationModel = nullptr;
 
 	spring::thread soundThread;
 	spring::unordered_map<std::string, size_t> soundMap; // <name, id>

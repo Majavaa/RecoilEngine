@@ -124,6 +124,9 @@ void CSound::Kill()
 			soundThread.join();
 	}
 
+    delete attenuationModel;
+    attenuationModel = nullptr;
+
 	SoundBuffer::Deinitialise();
 }
 

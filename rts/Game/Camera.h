@@ -311,7 +311,7 @@ private:
 
 	uint8_t inViewPlanesMask;
 
-    float terrainDistance;
+    float terrainDistance = 1000;
 
 	bool movState[10]; // fwd, back, left, right, up, down, fast, slow, tilt, reset
 	bool rotState[4]; // unused

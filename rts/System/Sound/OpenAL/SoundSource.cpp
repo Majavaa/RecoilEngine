@@ -22,9 +22,6 @@
 #include "Sim/Misc/GlobalConstants.h"
 #include "System/float3.h"
 
-static constexpr float ROLLOFF_FACTOR = 5.0f;
-static constexpr float REFERENCE_DIST = 200.0f;
-
 // used to adjust the pitch to the GameSpeed (optional)
 float CSoundSource::globalPitch = 1.0f;
 
@@ -33,7 +30,6 @@ float CSoundSource::heightRolloffModifier = 1.0f;
 
 void CSoundSource::swap(CSoundSource& r)
 {
-    LOG_L(L_WARNING, "SWAP");
 	std::swap(id, r.id);
 	std::swap(currentChannel, r.currentChannel);
 	std::swap(curStream, r.curStream);
@@ -122,7 +118,7 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
         currentFilterValue = attenuationOutput.filterFactor;
     }
 
-    efx.Enabled();
+    efx.Enable();
     efxEnabled = true;
 
     //TODO currentSoundItem.randomVolume is quite overtuned on many things (0.35 for example)
@@ -133,7 +129,6 @@ void CSoundSource::ApplyAttenuationModel(bool smooth)
 
     //FIXME can't just do this as many volumes passed in Play are over 1
     // need to figure out what the best solution is for converting existing values to new system
-    //
 
     // alSourcef(id, AL_GAIN, attenuationOutput.volumeFactor * currentChannel->GetVolume() * currentVolume);
 

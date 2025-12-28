@@ -9,7 +9,6 @@ struct SoundAttenuationInput {
 /// All of the data used to calculate the totalFactor as well as the final totalFactor
 struct SoundAttenuationOutput {
     float forwardDistance;
-    float innerDistance;
     float outerDistance;
     float frustumHeight;
     float frustumWidth;
